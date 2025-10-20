@@ -5,6 +5,9 @@ project(CheckErrorApp LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
+# Colab required this line
+set(CMAKE_CUDA_ARCHITECTURES 75) 
+
 # Use debug flags if needed
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "*** Using debug flags")

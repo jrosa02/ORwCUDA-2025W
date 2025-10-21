@@ -75,7 +75,7 @@ Matrix addMatricesOnDevice(const Matrix &A, const Matrix &B, AddMethod method)
   int ncols = A.getCols();
   int nrows = A.getRows();
   
-  if(method == ByElements)
+  if(method == AddMethod::ByElements)
   {
     // Fixed: Use proper dimensions and limits
     threadsPerBlock.x = min(max(ncols, 1), 32);
@@ -86,14 +86,14 @@ Matrix addMatricesOnDevice(const Matrix &A, const Matrix &B, AddMethod method)
     
     addMatricesByElements<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, ncols, nrows);
   }
-  else if(method == ByRows)
+  else if(method == AddMethod::ByRows)
   {
     threadsPerBlock.y = min(max(nrows, 1), 256);  // Can use larger blocks for 1D
     blocksPerGrid.y = (nrows + threadsPerBlock.y - 1) / threadsPerBlock.y;
     
     addMatricesByRows<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, ncols, nrows);
   }
-  else if(method == ByColumns)
+  else if(method == AddMethod::ByColumns)
   {
     threadsPerBlock.x = min(max(ncols, 1), 256);  // Can use larger blocks for 1D
     blocksPerGrid.x = (ncols + threadsPerBlock.x - 1) / threadsPerBlock.x;

@@ -1,10 +1,11 @@
 #include "mult_mm.h"
 
-__device__ __shared__
-
 #define TILE_SIZE 16
 #define GET_IDX_ROW_MAJOR(width, x, y) (((y) * (width)) + (x))
 #define CHECK_MEM_RANGE_2D(index, ncols, nrows) if((index) >= ((ncols) * (nrows))) return;
+
+__device__ __shared__ float tileA[TILE_SIZE][TILE_SIZE] = {0};
+__device__ __shared__ float tileB[TILE_SIZE][TILE_SIZE] = {0};
 
 __global__ void matrixMulKernel(const float *A, const float *B, float *C,
                                 int A_rows, int A_cols, int B_cols)
@@ -31,10 +32,13 @@ __global__ void matrixMulKernel(const float *A, const float *B, float *C,
     }
 }
 
-
 __global__ void matrixMulTiledKernel(const float *A, const float *B, float *C,
                                      int A_rows, int A_cols, int B_cols)
 {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    
 }
 
 __global__ void matrixMulGranularKernel(const float *A, const float *B, float *C,

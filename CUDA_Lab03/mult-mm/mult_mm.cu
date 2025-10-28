@@ -76,6 +76,8 @@ __global__ void matrixMulTiledKernel(const float *A, const float *B, float *C,
 __global__ void matrixMulGranularKernel(const float *A, const float *B, float *C,
                                         int A_rows, int A_cols, int B_cols)
 {
+    __shared__ float tileA[TILE_SIZE][TILE_SIZE];
+    __shared__ float tileB[TILE_SIZE][TILE_SIZE];
     // Fine-grained version - each thread computes multiple elements
     const int ELEMENTS_PER_THREAD = 4;
     
@@ -83,18 +85,43 @@ __global__ void matrixMulGranularKernel(const float *A, const float *B, float *C
     {
         int row = blockIdx.y * blockDim.y * ELEMENTS_PER_THREAD + threadIdx.y * ELEMENTS_PER_THREAD + i;
         int col = blockIdx.x * blockDim.x + threadIdx.x;
-        
-        if (row < A_rows && col < B_cols)
-        {
-            float accumulator = 0.0f;
-            for (int k = 0; k < A_cols; ++k)
+
+        float accumulator = 0.0f;
+
+        for (int k = 0; k < (A_cols + TILE_SIZE - 1) / TILE_SIZE; ++k)
             {
-                accumulator += A[row * A_cols + k] * B[k * B_cols + col];
+                // Load tiles from global to shared memory
+                int a_col = k * TILE_SIZE + threadIdx.x;
+                int b_row = k * TILE_SIZE + threadIdx.y;
+                
+                if (row < A_rows && a_col < A_cols)
+                    tileA[threadIdx.y][threadIdx.x] = A[row * A_cols + a_col];
+                else
+                    tileA[threadIdx.y][threadIdx.x] = 0.0f;
+                    
+                if (b_row < A_cols && col < B_cols)
+                    tileB[threadIdx.y][threadIdx.x] = B[b_row * B_cols + col];
+                else
+                    tileB[threadIdx.y][threadIdx.x] = 0.0f;
+                
+                __syncthreads();
+                
+                // Compute partial product
+                for (int i = 0; i < TILE_SIZE; ++i)
+                {
+                    accumulator += tileA[threadIdx.y][i] * tileB[i][threadIdx.x];
+                }
+                
+                __syncthreads();
             }
-            C[row * B_cols + col] = accumulator;
-        }
+            
+            if (row < A_rows && col < B_cols)
+            {
+                C[row * B_cols + col] = accumulator;
+            }   
     }
 }
+
 Matrix multMatrixMatrixOnDevice(const Matrix &A, const Matrix &B, MultMethod method)
 {
     if (A.getCols() != B.getRows())

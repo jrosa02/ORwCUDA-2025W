@@ -10,7 +10,7 @@
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "program": "${fileDirname}/build/${fileBasenameNoExtension}.out",
-            "args": "${fileDirname}/output/mat_A.txt ${fileDirname}/output/mat_B.txt ${fileDirname}/result"
+            "args": "${fileDirname}/../histogram_txt/histogram/input-data/bible.txt ${fileDirname}/output 10"
         }
     ]
 }

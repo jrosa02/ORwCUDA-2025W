@@ -10,7 +10,8 @@
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "program": "${fileDirname}/build/${fileBasenameNoExtension}.out",
-            "args": "${fileDirname}/../histogram_txt/histogram/input-data/bible.txt ${fileDirname}/output 10"
+            "args": "${fileDirname}/testcase.txt ${fileDirname}/output",
+            "stopAtEntry": true
         }
     ]
 }

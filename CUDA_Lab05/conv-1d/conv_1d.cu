@@ -9,28 +9,40 @@ __global__ void conv1dBasicKernel(float *output, const float *signal, const int 
     int position = 0;
     if (threadId >= width) return;
 
-    float signal_probe = 0;
     float accumulator = 0;
 
     for (size_t i = 0; i < maskWidth; ++i)
     {
-        position = threadId-maskWidth+((int)i);
-        if ( position > 0 && position < width)
+        position = threadId-maskWidth/2+((int)i);
+        if ( position >= 0 && position < width)
         {
-            signal_probe = signal[position];
+          accumulator +=  signal[position]*c_mask[i];;
         }
-        else
-        {
-            signal_probe = 0;
-        }
-
-        accumulator += signal_probe*c_mask[maskWidth-i];
     }
     output[threadId] = accumulator;
 }
 
+
 __global__ void conv1dTiledKernel(float *output, const float *signal, const int width, const int maskWidth)
 {
+    __shared__ float shared_memory[];
+
+    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    int position = 0;
+    if (threadId >= width) return;
+    float accumulator = 0;
+
+    __syncthreads();
+
+    for (size_t i = 0; i < maskWidth; ++i)
+    {
+        position = threadId-maskWidth/2+((int)i);
+        if ( position >= 0 && position < width)
+        {
+          accumulator +=  signal[position]*c_mask[i];
+        }
+    }
+    output[threadId] = accumulator;
 }
 
 std::vector<float> convolutionOnDevice(const std::vector<float> &signal, const std::vector<float> &mask, ConvMethod method)
@@ -55,8 +67,10 @@ std::vector<float> convolutionOnDevice(const std::vector<float> &signal, const s
 
     int blockSize = 256;
     int numBlocks = (width + blockSize - 1) / blockSize;
+    size_t shared_mem_size = blockSize+mask.size();
 
     cudaMemcpyToSymbol(c_mask, mask.data(), mask.size()*sizeof(mask[0]));
+    cudaMemcpy(d_signal, signal.data(), size_width, cudaMemcpyHostToDevice);
 
     if (numBlocks < 1) numBlocks = 1;
     // Launch appropriate kernel
@@ -66,7 +80,7 @@ std::vector<float> convolutionOnDevice(const std::vector<float> &signal, const s
     }
     else if (method == ConvMethod::Tiled)
     {
-        // conv1dTiledKernel<<<numBlocks, blockSize>>>();
+        conv1dTiledKernel<<<numBlocks, blockSize>>>(d_output, d_signal, width, mask.size());
     }
     else
     {

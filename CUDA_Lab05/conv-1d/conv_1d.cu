@@ -22,28 +22,40 @@ __global__ void conv1dBasicKernel(float *output, const float *signal, const int 
     output[threadId] = accumulator;
 }
 
-
-__global__ void conv1dTiledKernel(float *output, const float *signal, const int width, const int maskWidth)
+__global__ void conv1dTiledKernel(float *output, const float *signal, int width, int maskWidth)
 {
-    __shared__ float shared_memory[];
+   extern __shared__ float shared_signal[];
 
-    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
-    int position = 0;
-    if (threadId >= width) return;
-    float accumulator = 0;
+    int globalId = blockIdx.x * blockDim.x + threadIdx.x;
+    int localId  = threadIdx.x;
+
+    int radius = maskWidth / 2;
+    int sharedSize = blockDim.x + maskWidth - 1;
+
+    int start = blockIdx.x * blockDim.x - radius;
+
+    for (int i = localId; i < sharedSize; i += blockDim.x)
+    {
+        int globalIndex = start + i;
+        if (globalIndex >= 0 && globalIndex < width)
+            shared_signal[i] = signal[globalIndex];
+        else
+            shared_signal[i] = 0.0f; // zero padding
+    }
 
     __syncthreads();
 
-    for (size_t i = 0; i < maskWidth; ++i)
+    if (globalId < width)
     {
-        position = threadId-maskWidth/2+((int)i);
-        if ( position >= 0 && position < width)
+        float accumulator = 0.0f;
+        for (int j = 0; j < maskWidth; ++j)
         {
-          accumulator +=  signal[position]*c_mask[i];
+            accumulator += shared_signal[localId + j] * c_mask[j];
         }
+        output[globalId] = accumulator;
     }
-    output[threadId] = accumulator;
 }
+
 
 std::vector<float> convolutionOnDevice(const std::vector<float> &signal, const std::vector<float> &mask, ConvMethod method)
 {
@@ -67,20 +79,20 @@ std::vector<float> convolutionOnDevice(const std::vector<float> &signal, const s
 
     int blockSize = 256;
     int numBlocks = (width + blockSize - 1) / blockSize;
-    size_t shared_mem_size = blockSize+mask.size();
+    int sharedMemSize = (blockSize + mask.size() - 1) * sizeof(float);
 
     cudaMemcpyToSymbol(c_mask, mask.data(), mask.size()*sizeof(mask[0]));
     cudaMemcpy(d_signal, signal.data(), size_width, cudaMemcpyHostToDevice);
 
     if (numBlocks < 1) numBlocks = 1;
-    // Launch appropriate kernel
+
     if (method == ConvMethod::Basic)
     {
         conv1dBasicKernel<<<numBlocks, blockSize>>>(d_output, d_signal, width, mask.size());
     }
     else if (method == ConvMethod::Tiled)
     {
-        conv1dTiledKernel<<<numBlocks, blockSize>>>(d_output, d_signal, width, mask.size());
+        conv1dTiledKernel<<<numBlocks, blockSize, sharedMemSize>>>(d_output, d_signal, width, mask.size());
     }
     else
     {

@@ -10,7 +10,7 @@
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "program": "${fileDirname}/build/${fileBasenameNoExtension}.out",
-            "args": "${fileDirname}/testcase.txt ${fileDirname}/output",
+            "args": "15",
             "stopAtEntry": true
         }
     ]

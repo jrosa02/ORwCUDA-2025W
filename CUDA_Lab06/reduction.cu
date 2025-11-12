@@ -10,32 +10,65 @@ namespace cg = cooperative_groups;
 __global__ void reductionKernelBasic(int *sum, int *input, int width)
 {
     __shared__ int block_mem[BLOCK_SIZE];
-    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    uint threadId = blockIdx.x * blockDim.x + threadIdx.x;
     if (threadId>width) return;
 
-    for (size_t i = 0; i < BLOCK_SIZE; i++)
+    if (threadId < width)
     {
-        block_mem[i] = input[blockIdx.x*BLOCK_SIZE+i];
+        block_mem[threadIdx.x] = input[threadId];
+    }
+    else
+    {
+        block_mem[threadIdx.x] = 0;
     }
 
-    for (uint i = 1; (1<<(i-1)) < width; i++)
+    __syncthreads();
+
+    for (uint i = 1; (1<<(i-1)) < BLOCK_SIZE; i++)
     {
-        if (threadId%(1<<i)==0)
+        if (threadIdx.x%(1<<i)==0)
         {
-            atomicAdd(&input[threadId], input[threadId+(1<<i-1)]);
+            atomicAdd(&block_mem[threadIdx.x], block_mem[threadIdx.x+(1<<i-1)]);
         }
         __syncthreads();
     }
-    if (threadId == 0)
+
+    if (threadIdx.x == 0)
     {
-        *sum = input[0]; 
+        atomicAdd(sum, block_mem[0]); 
     }
 }
 
 __global__ void reductionKernelOptimized(int *sum, int *input, int width)
 {
-    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadId >= width) return;
+    __shared__ int block_mem[BLOCK_SIZE];
+    uint threadId = blockIdx.x * blockDim.x + threadIdx.x;
+    if (threadId>width) return;
+
+    if (threadId < width)
+    {
+        block_mem[threadIdx.x] = input[threadId];
+    }
+    else
+    {
+        block_mem[threadIdx.x] = 0;
+    }
+
+    __syncthreads();
+
+    for (int i = 7; i >= 0; i--)
+    {
+        if (threadIdx.x < (1<<i))
+        {
+            atomicAdd(&block_mem[threadIdx.x], block_mem[threadIdx.x+(1<<i)]);
+        }
+        __syncthreads();
+    }
+
+    if (threadIdx.x == 0)
+    {
+        atomicAdd(sum, block_mem[0]); 
+    }
 }
 
 __global__ void reductionKernelCooperativeGroups(int *sum, const int *input, int width)
@@ -65,7 +98,6 @@ int reductionOnDevice(const std::vector<int> &data, ReductionMethod method)
 
     int blockSize = BLOCK_SIZE;
     int numBlocks = (width + blockSize - 1) / blockSize;
-    int sharedMemSize = (blockSize - 1) * sizeof(output);
 
     cudaMemcpy(d_data, data.data(), size_width, cudaMemcpyHostToDevice);
 
@@ -77,11 +109,11 @@ int reductionOnDevice(const std::vector<int> &data, ReductionMethod method)
     }
     else if (method == ReductionMethod::Optimized)
     {
-        reductionKernelOptimized<<<numBlocks, blockSize, sharedMemSize>>>(d_output, d_data, width);
+        reductionKernelOptimized<<<numBlocks, blockSize>>>(d_output, d_data, width);
     }
     else if (method == ReductionMethod::CooperativeGroups)
     {
-        reductionKernelCooperativeGroups<<<numBlocks, blockSize, sharedMemSize>>>(d_output, d_data, width);
+        reductionKernelCooperativeGroups<<<numBlocks, blockSize>>>(d_output, d_data, width);
     }
     
     else

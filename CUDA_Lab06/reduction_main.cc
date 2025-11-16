@@ -74,20 +74,20 @@ int main(int argc, char **argv)
         std::cout << "\033[32mSuccess: Device (optimized) result matches host result.\033[0m" << std::endl;
     }
 
-    // start = std::chrono::high_resolution_clock::now();
-    // resultDevice = reductionOnDevice(data, ReductionMethod::CooperativeGroups);
-    // end = std::chrono::high_resolution_clock::now();
-    // duration = end - start;
-    // std::cout << "\033[35mDevice (cooperative groups) computation time: " << duration.count() << " seconds.\033[0m" << std::endl;
-    // if (std::abs(resultDevice - resultHost) > EPS)
-    // {
-    //     std::cerr << "\033[31mError: Device (cooperative groups) result does not match host result!\033[0m" << std::endl;
-    //     std::cerr << "Host result: " << resultHost << ", Device result: " << resultDevice << std::endl;
-    // }
-    // else
-    // {
-    //     std::cout << "\033[32mSuccess: Device (cooperative groups) result matches host result.\033[0m" << std::endl;
-    // }
+    start = std::chrono::high_resolution_clock::now();
+    resultDevice = reductionOnDevice(data, ReductionMethod::CooperativeGroups);
+    end = std::chrono::high_resolution_clock::now();
+    duration = end - start;
+    std::cout << "\033[35mDevice (cooperative groups) computation time: " << duration.count() << " seconds.\033[0m" << std::endl;
+    if (std::abs(resultDevice - resultHost) > EPS)
+    {
+        std::cerr << "\033[31mError: Device (cooperative groups) result does not match host result!\033[0m" << std::endl;
+        std::cerr << "Host result: " << resultHost << ", Device result: " << resultDevice << std::endl;
+    }
+    else
+    {
+        std::cout << "\033[32mSuccess: Device (cooperative groups) result matches host result.\033[0m" << std::endl;
+    }
 
     return 0;
 }

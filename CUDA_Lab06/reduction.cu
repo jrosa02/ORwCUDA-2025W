@@ -71,8 +71,44 @@ __global__ void reductionKernelOptimized(int *sum, int *input, int width)
     }
 }
 
+__device__ __inline__ int block_reduce(cg::thread_block block, int *smem, int value)
+{
+    int tid = block.thread_rank();
+    int n   = block.size();
+
+    smem[tid] = value;
+    block.sync();
+
+    for (int stride = n >> 1; stride > 0; stride >>= 1)
+    {
+        if (tid < stride)
+        {
+            smem[tid] += smem[tid + stride];
+        }
+        block.sync();
+    }
+
+    return smem[0];
+}
+
 __global__ void reductionKernelCooperativeGroups(int *sum, const int *input, int width)
 {
+    cg::thread_block block = cg::this_thread_block();
+    __shared__ int smem[BLOCK_SIZE]; // stały rozmiar
+
+    int globalId = blockIdx.x * blockDim.x + threadIdx.x;
+    int value = (globalId < width) ? input[globalId] : 0;
+
+    int tid = block.thread_rank();
+    if (tid < BLOCK_SIZE) smem[tid] = value; // bezpieczny zapis
+    block.sync();
+
+    int blockSum = block_reduce(block, smem, value);
+
+    if (block.thread_rank() == 0)
+    {
+        atomicAdd(sum, blockSum);
+    }
 }
 
 

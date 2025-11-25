@@ -1,127 +1,79 @@
 #include "scan.h"
+#include <cuda_runtime.h>
+#include <stdexcept>
 
-__global__ void kernelScan(int *out, const int *in, size_t n)
+#define CUDA_CHECK(x) do { if ((x) != cudaSuccess) \
+    throw std::runtime_error(cudaGetErrorString(x)); } while(0)
+
+// Kernel 1: skan w obrębie bloków + zapis sum blokowych
+__global__ void kernelBlockScanInclusive(const int *in, int *out, int n, int *blockSums)
 {
-    __shared__ int block_mem[BLOCK_SIZE];
-    uint threadId = blockIdx.x * blockDim.x + threadIdx.x;
-    int local_add = 0;
+    __shared__ int sdata[BLOCK_SIZE];
+    unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned tid = threadIdx.x;
 
-    if (threadId < n)
-    {
-        block_mem[threadIdx.x] = in[threadId];
-    }
-    else
-    {
-        block_mem[threadIdx.x] = 0;
-    }
-
+    sdata[tid] = (gid < n ? in[gid] : 0);
     __syncthreads();
 
-    for (uint i = 0; (1<<i) < BLOCK_SIZE; i++)
-    {
-        local_add = 0;
-        if (threadIdx.x>((1<<i)-1))
-        {
-            local_add = block_mem[(threadIdx.x-(1<<i))];
-        }
-
+    for (unsigned offset = 1; offset < blockDim.x; offset <<= 1) {
+        int val = (tid >= offset ? sdata[tid - offset] : 0);
         __syncthreads();
-
-        if (threadIdx.x>((1<<i)-1))
-        {
-            atomicAdd(&block_mem[threadIdx.x], local_add);
-        }
-        
+        sdata[tid] += val;
         __syncthreads();
     }
 
-    out[threadId] = block_mem[threadIdx.x];
+    if (gid < n) out[gid] = sdata[tid];
+    if (tid == blockDim.x - 1) blockSums[blockIdx.x] = sdata[tid];
 }
 
-__global__ void kernelAddSums(int *out, const int *sums, size_t n)
+// Kernel 2: dodanie przesunięć blokowych
+__global__ void kernelAddBlockOffsets(int *out, const int *offsets, int n)
 {
-    __shared__ int block_mem[BLOCK_SIZE];
-    uint threadId = blockIdx.x * blockDim.x + threadIdx.x;
-    int prevSumIndx = blockIdx.x * blockDim.x - 1;
-
-    if (threadId*BLOCK_SIZE < n)
-    {
-        block_mem[threadIdx.x] = sums[threadId*BLOCK_SIZE];
-    }
-    else
-    {
-        block_mem[threadIdx.x] = 0;
-    }
-
-    __syncthreads();
-
-    for (int i = 7; i >= 0; i--)
-    {
-        if (threadIdx.x < (1<<i))
-        {
-            atomicAdd(&block_mem[threadIdx.x], block_mem[threadIdx.x+(1<<i)]);
-        }
-        __syncthreads();
-    }
-
-    out[threadId] = block_mem[threadIdx.x];
+    unsigned gid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (gid >= n || blockIdx.x == 0) return;
+    out[gid] += offsets[blockIdx.x - 1];
 }
 
+// CPU scan
+static void cpuScan(std::vector<int> &v)
+{
+    for (size_t i = 1; i < v.size(); ++i) v[i] += v[i - 1];
+}
+
+// Główna funkcja
 std::vector<int> scanOnDevice(const std::vector<int> &in, ScanMethod method)
 {
-    cudaError_t err = cudaSuccess;
-    std::vector<int> output = {0};
-    output.reserve(in.size());
+    if (in.empty()) return {};
+    int n = in.size();
 
-    int *d_in = nullptr;
-    int *d_out = nullptr;
+    int *d_in, *d_out, *d_blockSums;
+    CUDA_CHECK(cudaMalloc(&d_in, n * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_out, n * sizeof(int)));
 
-    int  width = in.size();
-    int size_width = width*sizeof(in[0]);
+    int numBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    CUDA_CHECK(cudaMalloc(&d_blockSums, numBlocks * sizeof(int)));
 
-    err = cudaMalloc((void **)&d_in, size_width);
-    if (err != cudaSuccess) {
-        throw std::runtime_error(cudaGetErrorString(err));
-    }
-    err = cudaMalloc((void **)&d_out, size_width);
-    if (err != cudaSuccess) {
-        throw std::runtime_error(cudaGetErrorString(err));
-    }
+    CUDA_CHECK(cudaMemcpy(d_in, in.data(), n * sizeof(int), cudaMemcpyHostToDevice));
 
-    int blockSize = BLOCK_SIZE;
-    int numBlocks = (width + blockSize - 1) / blockSize;
+    kernelBlockScanInclusive<<<numBlocks, BLOCK_SIZE>>>(d_in, d_out, n, d_blockSums);
+    CUDA_CHECK(cudaDeviceSynchronize());
 
-    cudaMemcpy(d_in, in.data(), size_width, cudaMemcpyHostToDevice);
-
-    if (numBlocks < 1) numBlocks = 1;
-
-    kernelScan<<<numBlocks, blockSize>>>(d_out, d_in, width);
-    
-    // Check for kernel launch errors
-    err = cudaGetLastError();
-    if (err != cudaSuccess) {    
-        cudaFree(d_in);
-        cudaFree(d_out);
-        throw std::runtime_error(cudaGetErrorString(err));
+    if (numBlocks > 1) {
+        std::vector<int> blockSums(numBlocks);
+        CUDA_CHECK(cudaMemcpy(blockSums.data(), d_blockSums, numBlocks*sizeof(int), cudaMemcpyDeviceToHost));
+        cpuScan(blockSums);
+        CUDA_CHECK(cudaMemcpy(d_blockSums, blockSums.data(), numBlocks*sizeof(int), cudaMemcpyHostToDevice));
+        kernelAddBlockOffsets<<<numBlocks, BLOCK_SIZE>>>(d_out, d_blockSums, n);
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        cudaFree(d_in);
-        cudaFree(d_out); 
-        throw std::runtime_error(cudaGetErrorString(err));
-    }
+    std::vector<int> out(n);
+    CUDA_CHECK(cudaMemcpy(out.data(), d_out, n * sizeof(int), cudaMemcpyDeviceToHost));
 
-    // Copy result back
-    err = cudaMemcpy(output.data(), d_out, size_width, cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) {
-        cudaFree(d_in);
-        cudaFree(d_out);
-        throw std::runtime_error(cudaGetErrorString(err));
-    }
-
-    return output;
-
+    cudaFree(d_in);
+    cudaFree(d_out);
+    cudaFree(d_blockSums);
+    return out;
 }
 
 std::vector<int> scanOnHost(const std::vector<int> &in)

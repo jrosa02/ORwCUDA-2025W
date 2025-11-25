@@ -29,6 +29,6 @@ std::vector<int> scanOnHost(const std::vector<int> &input);
  * @param method Method to use for scan (default: KoggeStone)
  * @return std::vector<int> Output data containing the prefix sums
  */
-std::vector<int> scanOnDevice(const std::vector<int> &input, ScanMethod method = ScanMethod::KoggeStone);
+std::vector<int> scanOnDevice(const std::vector<int> &in, ScanMethod method = ScanMethod::KoggeStone);
 
 #endif // SCAN_H_

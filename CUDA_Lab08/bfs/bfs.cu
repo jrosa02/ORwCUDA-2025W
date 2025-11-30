@@ -39,7 +39,6 @@ namespace bfs
                                   int *pFrontier, int *cFrontier,
                                   int *pFrontierTail, int *cFrontierTail)
     {
-        // odczyt rozmiaru poprzedniej frontierki (przechowywany jako jedno int w pamięci device)
         int pSize = 0;
         pSize = *pFrontierTail; // odczyt z pamięci device
 
@@ -73,8 +72,8 @@ namespace bfs
 
     std::vector<int> bfsOnDevice(const GraphCSR &graph, unsigned int source, BFSQueueType queueType)
     {
-        // nie zmieniamy sygnatury; implementacja korzysta z kolejki globalnej
-        (void)queueType; // jeżeli enum jest wymagany, ale w tej funkcji używamy global queue
+        if (queueType != BFSQueueType::Global)
+            return {0};
 
         const int nodes = static_cast<int>(graph.edges.size() - 1);
         const int edges_size = static_cast<int>(graph.edges.size());
